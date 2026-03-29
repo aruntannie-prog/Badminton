@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Icon Generator</title>
+    <style>
+        body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { background: #333; }
+    </style>
+</head>
+<body>
+    <canvas id="iconCanvas" width="1284" height="2778"></canvas>
+    <script>
+        const canvas = document.getElementById('iconCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 1. Deep matte dark gray background
+        ctx.fillStyle = '#1A1A1A';
+        ctx.fillRect(0, 0, 1284, 2778);
+
+        // 2. Black circular background (Centered)
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 100;
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.arc(642, 1389, 450, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // 3. Vibrant neon green (#76FF03) stylized shuttlecock icon
+        const neonGreen = '#76FF03';
+        ctx.strokeStyle = neonGreen;
+        ctx.lineWidth = 18;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Drawing a stylized shuttlecock
+        ctx.translate(642, 1389);
+        
+        // Base
+        ctx.beginPath();
+        ctx.arc(0, 150, 60, 0, Math.PI, false);
+        ctx.stroke();
+
+        // Feathers (Stylized lines)
+        ctx.beginPath();
+        ctx.moveTo(-52, 142); ctx.lineTo(-120, -150);
+        ctx.moveTo(-22, 157); ctx.lineTo(-37, -180);
+        ctx.moveTo(0, 165); ctx.lineTo(0, -195);
+        ctx.moveTo(22, 157); ctx.lineTo(37, -180);
+        ctx.moveTo(52, 142); ctx.lineTo(120, -150);
+        
+        // Top curve
+        ctx.moveTo(-120, -150);
+        ctx.quadraticCurveTo(0, -210, 120, -150);
+        ctx.stroke();
+
+        // Add a slight glow
+        ctx.shadowColor = neonGreen;
+        ctx.shadowBlur = 30;
+        ctx.stroke();
+
+        // Add Text for Splash
+        ctx.translate(0, 500);
+        ctx.font = 'bold 64px sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.fillText('BADMINTON', 0, 0);
+        ctx.font = '300 48px sans-serif';
+        ctx.letterSpacing = '10px';
+        ctx.fillText('SCORECARD', 0, 80);
+    </script>
+</body>
+</html>
