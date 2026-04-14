@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
-import React, { useState, useEffect } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KVStore } from '../database/KVStore';
@@ -14,15 +14,33 @@ export default function HomeScreen() {
     const [selectedCount, setSelectedCount] = useState<number | null>(null);
     const [hasActiveMatch, setHasActiveMatch] = useState(false);
 
-    useEffect(() => {
-        loadSettings();
-    }, []);
+    useFocusEffect(
+        useCallback(() => {
+            loadSettings();
+        }, [])
+    );
 
     const loadSettings = async () => {
         const count = await KVStore.getItem('player_count');
         if (count) setSelectedCount(parseInt(count));
+
         const activeMatch = await KVStore.getItem('active_match_setup');
-        setHasActiveMatch(!!activeMatch);
+        if (activeMatch) {
+            // Auto-expire stale sessions from previous days
+            const sessionDate = await KVStore.getItem('session_date');
+            const today = new Date().toDateString(); // e.g. "Tue Apr 15 2025"
+            if (sessionDate !== today) {
+                // Different day — clear the old session silently
+                await KVStore.removeItem('active_match_setup');
+                await KVStore.removeItem('match_number');
+                await KVStore.removeItem('session_date');
+                setHasActiveMatch(false);
+            } else {
+                setHasActiveMatch(true);
+            }
+        } else {
+            setHasActiveMatch(false);
+        }
     };
 
     const handleSelectCount = async (count: number) => {
@@ -30,9 +48,11 @@ export default function HomeScreen() {
         await KVStore.setItem('player_count', count.toString());
     };
 
-    const handleStartMatch = () => {
+    const handleStartMatch = async () => {
         if (selectedCount) {
-            router.push('/select-players');
+            // Stamp today's date so stale sessions auto-expire tomorrow
+            await KVStore.setItem('session_date', new Date().toDateString());
+            router.replace('/select-players');
         }
     };
 
@@ -89,10 +109,10 @@ export default function HomeScreen() {
 
                     {/* Action Buttons */}
                     <View style={styles.mainBtnGroup}>
-                        {/* Resume Match button — only shown when a match is active */}
+                        {/* Resume Match — only shown when a match is active */}
                         {hasActiveMatch && (
                             <TouchableOpacity
-                                onPress={() => router.push('/match')}
+                                onPress={() => router.replace('/match')}
                                 activeOpacity={0.8}
                             >
                                 <LinearGradient
@@ -123,7 +143,7 @@ export default function HomeScreen() {
 
                         <TouchableOpacity
                             style={styles.historyBtn}
-                            onPress={() => router.push('/stats?tab=history&from=home')}
+                            onPress={() => router.replace('/stats?tab=history&from=home')}
                             activeOpacity={0.8}
                         >
                             <LinearGradient
@@ -136,7 +156,7 @@ export default function HomeScreen() {
 
                         <TouchableOpacity
                             style={styles.historyBtn}
-                            onPress={() => router.push('/stats?tab=leaderboard&from=home')}
+                            onPress={() => router.replace('/stats?tab=leaderboard&from=home')}
                             activeOpacity={0.8}
                         >
                             <LinearGradient

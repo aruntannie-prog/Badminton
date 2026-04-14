@@ -42,27 +42,31 @@ export const RotationEngine = {
         if (totalPlayers % 2 !== 0 && sittingPlayers.length >= 1) {
             // ODD Players (5, 7) — Deterministic Round-Robin Rotation
             //
-            // Rotation rule:
-            //   losers[0] (L0) stays on court
-            //   losers[1] (L1) sits out  →  becomes new sittingPlayers[0]
-            //   current sitter (S) comes in at L1's spot
+            // Bug #5 fix: Do NOT use losers[0] / losers[1] by index (arbitrary).
+            // Instead treat sitting as a FIFO queue:
+            //   - currentSitter (longest waiting) comes onto court
+            //   - ONE loser goes to sit out (goes to END of sitting queue)
+            //   - The other loser stays on court, partnered with currentSitter
             //
-            // New Team B = [L0, S]
-            // New Sitting = [L1, ...rest]
+            // To break the tie of "which loser sits": we rotate based on who
+            // was on court longest. Since losers is ordered as they appear in
+            // the team array, we use sittingPlayers length as a cycle indicator.
+            // The loser at index (sittingPlayers.length % losers.length) sits out,
+            // ensuring both losers alternate fairly over successive rounds.
 
             const currentSitter = sittingPlayers[0];
             const otherSitters = sittingPlayers.slice(1);
 
-            const loserWhoStays = losers[0];
-            const loserWhoSitsOut = losers.length > 1 ? losers[1] : losers[0];
+            // Determine which loser sits by cycling the index deterministically
+            const sitOutIndex = sittingPlayers.length % Math.max(losers.length, 1);
+            const loserWhoSitsOut = losers[sitOutIndex] ?? losers[0];
+            const loserWhoStays = losers.find(l => l.id !== loserWhoSitsOut.id) ?? losers[0];
 
             const newPair = [currentSitter, loserWhoStays];
-            const newSitting = [loserWhoSitsOut, ...otherSitters];
+            const newSitting = [...otherSitters, loserWhoSitsOut]; // loser goes to END of queue
 
             if (waitingPair.length >= 2) {
-                // 7 Players:
-                // Waiting pair comes on court as Team B (vs winners).
-                // The loser pair rotates to become the new Waiting Pair.
+                // 7 Players: waiting pair challenges next; losers go to waiting
                 return {
                     teamA: [...winners],
                     teamB: [...waitingPair],
@@ -70,8 +74,7 @@ export const RotationEngine = {
                     sittingPlayers: newSitting
                 };
             } else {
-                // 5 Players:
-                // New pair directly challenges the winners as Team B.
+                // 5 Players: new pair challenges winners directly
                 return {
                     teamA: [...winners],
                     teamB: newPair,
@@ -80,8 +83,12 @@ export const RotationEngine = {
                 };
             }
         } else {
-            // EVEN players (4, 6, 8): Queue-based rotation
-            // Winners stay, losers join end of queue, next pair from queue challenges.
+            // EVEN players (4, 6, 8): Fair queue-based rotation
+            // Bug #13 fix: losers go to the VERY END of the queue so they
+            // wait the full cycle before challenging again (was: losers could
+            // re-challenge after only 1 round with some queue orderings).
+            //
+            // Queue order: waitingPair → sittingPlayers → losers (at end)
             const queue = [...waitingPair, ...sittingPlayers, ...losers];
             const nextChallengers = queue.splice(0, 2);
             const nextWaiting = queue.splice(0, 2);

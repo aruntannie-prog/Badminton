@@ -14,8 +14,9 @@ export function BottomNav() {
     const [hasActiveMatch, setHasActiveMatch] = useState(false);
 
     useEffect(() => {
+        // Read once on mount — handlePress does a live read when Home tab is tapped
         KVStore.getItem('active_match_setup').then(val => setHasActiveMatch(!!val));
-    }, [pathname]); // re-check whenever screen changes
+    }, []); // Bug #7 fix: was [pathname], causing a DB read on every navigation
 
     const tabs = [
         { name: 'Home', icon: 'home-outline', activeIcon: 'home', path: '/' },
@@ -41,9 +42,9 @@ export function BottomNav() {
                         // If a match is in progress, go back to it instead of home
                         const activeMatch = await KVStore.getItem('active_match_setup');
                         if (activeMatch) {
-                            router.push('/match');
+                            router.replace('/match');
                         } else {
-                            router.push('/');
+                            router.replace('/');
                         }
                         return;
                     }
@@ -53,7 +54,7 @@ export function BottomNav() {
                         const connector = tab.path.includes('?') ? '&' : '?';
                         targetPath = `${tab.path}${connector}from=${from}`;
                     }
-                    router.push(targetPath as any);
+                    router.replace(targetPath as any);
                 };
 
                 return (

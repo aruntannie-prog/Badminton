@@ -1,4 +1,5 @@
 import { getDatabase } from './db';
+import { CloudSyncService } from './CloudSyncService';
 
 export interface Match {
     id: number;
@@ -18,11 +19,15 @@ export const MatchRepository = {
 
     async saveMatch(match: Omit<Match, 'id'>): Promise<void> {
         const db = await getDatabase();
-        await db.runAsync(
+        const result = await db.runAsync(
             `INSERT INTO matches (timestamp, teamAPlayers, teamBPlayers, teamAScore, teamBScore, winnerTeam)
        VALUES (?, ?, ?, ?, ?, ?)`,
             match.timestamp, match.teamAPlayers, match.teamBPlayers, match.teamAScore, match.teamBScore, match.winnerTeam
         );
+        
+        // Sync to cloud in background — don't block or throw on network failure
+        const fullMatch: Match = { ...match, id: result.lastInsertRowId };
+        CloudSyncService.syncMatch(fullMatch).catch(e => console.warn('Cloud sync failed (saveMatch):', e));
     },
 
     async updateMatchScore(id: number, teamAScore: number, teamBScore: number, winnerTeam: 'A' | 'B'): Promise<void> {
@@ -36,5 +41,19 @@ export const MatchRepository = {
     async clearAllMatches(): Promise<void> {
         const db = await getDatabase();
         await db.runAsync('DELETE FROM matches');
+        // Sync to cloud in background
+        CloudSyncService.clearMatches().catch(e => console.warn('Cloud sync failed (clearMatches):', e));
+    },
+
+    /**
+     * Internal use only: Restores a match from cloud without triggering a re-sync
+     */
+    async restoreMatch(match: Match): Promise<void> {
+        const db = await getDatabase();
+        await db.runAsync(
+            `INSERT OR REPLACE INTO matches (id, timestamp, teamAPlayers, teamBPlayers, teamAScore, teamBScore, winnerTeam)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            match.id, match.timestamp, match.teamAPlayers, match.teamBPlayers, match.teamAScore, match.teamBScore, match.winnerTeam
+        );
     }
 };

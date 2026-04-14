@@ -94,9 +94,54 @@ export default function StatsScreen() {
 
         const winner = sA > sB ? 'A' : 'B';
 
-        await MatchRepository.updateMatchScore(selectedMatch.id, sA, sB, winner);
-        setEditModalVisible(false);
-        loadData(); // Reload stats
+        try {
+            // 1. Update match record in DB
+            await MatchRepository.updateMatchScore(selectedMatch.id, sA, sB, winner);
+            setEditModalVisible(false);
+
+            // 2. Recalculate ALL player stats from match records (Bug #9 fix)
+            //    Manual increments get out of sync; always derive from ground truth.
+            const [allMatches, allPlayers] = await Promise.all([
+                MatchRepository.getAllMatches(),
+                PlayerRepository.getAllPlayers()
+            ]);
+
+            // Reset stats for every player to zero first
+            const statsMap = new Map<number, { matchesPlayed: number; wins: number; losses: number }>();
+            for (const p of allPlayers) {
+                statsMap.set(p.id, { matchesPlayed: 0, wins: 0, losses: 0 });
+            }
+
+            // Accumulate from all match records
+            for (const match of allMatches) {
+                const winIds = (match.winnerTeam === 'A' ? match.teamAPlayers : match.teamBPlayers)
+                    .split(',').map(Number);
+                const loseIds = (match.winnerTeam === 'A' ? match.teamBPlayers : match.teamAPlayers)
+                    .split(',').map(Number);
+                for (const id of winIds) {
+                    const s = statsMap.get(id);
+                    if (s) { s.matchesPlayed++; s.wins++; }
+                }
+                for (const id of loseIds) {
+                    const s = statsMap.get(id);
+                    if (s) { s.matchesPlayed++; s.losses++; }
+                }
+            }
+
+            // Write corrected stats back to each player
+            for (const player of allPlayers) {
+                const s = statsMap.get(player.id);
+                if (s) {
+                    await PlayerRepository.updatePlayer({ ...player, ...s });
+                }
+            }
+
+            // 3. Reload UI
+            await loadData();
+        } catch (e) {
+            console.error('Failed to edit match:', e);
+            Alert.alert('Error', 'Failed to update match score.');
+        }
     };
 
     useEffect(() => {
@@ -144,20 +189,29 @@ export default function StatsScreen() {
     }, [matches, players]);
 
     const handleBack = async () => {
-        if (params.from === 'home') {
+        const from = params.from as string;
+        
+        console.log("Back button pressed. Origin:", from);
+
+        if (from === 'home') {
             router.replace('/');
             return;
         }
-        if (params.from === 'match') {
+        if (from === 'match') {
             router.replace('/match');
             return;
         }
 
-        // Fallback or default behavior
-        const activeMatch = await KVStore.getItem('active_match_setup');
-        if (activeMatch) {
-            router.replace('/match');
-        } else {
+        // Fallback or default behavior: check if there is an active match
+        try {
+            const activeMatch = await KVStore.getItem('active_match_setup');
+            if (activeMatch) {
+                router.replace('/match');
+            } else {
+                router.replace('/');
+            }
+        } catch (e) {
+            console.error("Error in handleBack:", e);
             router.replace('/');
         }
     };
@@ -232,17 +286,25 @@ export default function StatsScreen() {
                 </View>
 
                 <View ref={shareRef as any} collapsable={false} style={{ backgroundColor: '#000', paddingVertical: 10 }}>
-                    {/* Summary Cards */}
+                    {/* Summary Cards — labels adapt to the current filter */}
                     <View style={[styles.statsGrid, { marginBottom: 20 }]}>
                         <LinearGradient colors={['#1F1F1F', '#121212']} style={styles.statCard}>
                             <Ionicons name="calendar-outline" size={24} color="#76FF03" />
-                            <Text style={styles.statValue}>{globalStats.totalMatchesToday}</Text>
-                            <Text style={styles.statLabel}>Matches Today</Text>
+                            <Text style={styles.statValue}>
+                                {timeFilter === 'today'
+                                    ? globalStats.totalMatchesToday
+                                    : globalStats.totalMatchesAllTime}
+                            </Text>
+                            <Text style={styles.statLabel}>
+                                {timeFilter === 'today' ? 'Matches Today' : 'Matches All-Time'}
+                            </Text>
                         </LinearGradient>
                         <LinearGradient colors={['#1F1F1F', '#121212']} style={styles.statCard}>
                             <Ionicons name="flash-outline" size={24} color="#FF9100" />
                             <Text style={styles.statValue}>{globalStats.totalPointsScored}</Text>
-                            <Text style={styles.statLabel}>Total Points</Text>
+                            <Text style={styles.statLabel}>
+                                {timeFilter === 'today' ? 'Points Today' : 'Points All-Time'}
+                            </Text>
                         </LinearGradient>
                     </View>
 
@@ -455,7 +517,13 @@ export default function StatsScreen() {
 
                     // Simple logic to get names - finding from full list for now
                     const getNames = (ids: string) => {
-                        return ids.split(',').map(id => players.find(p => p.id === parseInt(id))?.name || '?').join(' & ');
+                        if (!ids) return 'Unknown';
+                        return ids.split(',')
+                            .map(id => {
+                                const p = players.find(p => p.id === parseInt(id));
+                                return p ? p.name : `P#${id}`;
+                            })
+                            .join(' & ');
                     };
 
                     return (

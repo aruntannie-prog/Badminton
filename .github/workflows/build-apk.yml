@@ -1,0 +1,66 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Set up Node 20
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 3. Set up Java 17 (required for Gradle & Android)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 4. Install dependencies
+      - name: Install npm dependencies
+        run: npm ci
+
+      # 5. Install Expo CLI
+      - name: Install Expo CLI
+        run: npm install -g @expo/cli
+
+      # 6. Generate native Android project
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform android --clean --non-interactive
+
+      # 7. Make gradlew executable
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # 8. Accept Android SDK licenses
+      - name: Accept Android SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # 9. Build release APK (signed with a generated debug keystore—installable on any device)
+      - name: Build Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false"
+
+      # 10. Upload APK as downloadable artifact
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BadmintonSmartScore-v${{ github.run_number }}.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+          if-no-files-found: error

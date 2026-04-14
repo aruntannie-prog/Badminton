@@ -260,7 +260,7 @@ export default function SelectPlayersScreen() {
 
             <SafeAreaView style={styles.rootContent}>
                 <View style={styles.topHeader}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn}>
+                    <TouchableOpacity onPress={() => router.replace('/')} style={styles.iconBtn}>
                         <Ionicons name="chevron-back" size={28} color="#FFF" />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Add / Select Players</Text>
@@ -352,9 +352,8 @@ export default function SelectPlayersScreen() {
                         </View>
                     </View>
                 </View>
-            </Modal >
+            </Modal>
 
-            <BottomNav />
         </View >
     );
 }
