@@ -29,6 +29,11 @@ export default function MatchScreen() {
     const [scoreError, setScoreError] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Undo last score submission
+    type UndoState = { prevRotation: RotationResult; prevMatchNum: number; savedMatchId: number };
+    const [undoBanner, setUndoBanner] = useState<UndoState | null>(null);
+    const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     useEffect(() => {
         loadMatchState();
     }, []);
@@ -148,6 +153,10 @@ export default function MatchScreen() {
         };
 
         // ── Step 2: Update UI immediately — user sees next match at once ──
+        // Capture prev state BEFORE updating — needed for undo
+        const prevRotationSnap = rotation;
+        const prevMatchNumSnap = matchNumber;
+
         setRotation(nextRotation);
         setMatchNumber(nextMatchNum);
         setScoreA('');
@@ -164,26 +173,89 @@ export default function MatchScreen() {
             MatchRepository.saveMatch(matchData),
             KVStore.setItem('active_match_setup', JSON.stringify(nextRotation)),
             KVStore.setItem('match_number', nextMatchNum.toString()),
-            PlayerRepository.getAllPlayers().then(freshPlayers => {
-                const freshMap = new Map<number, Player>(freshPlayers.map(p => [p.id, p]));
-                return Promise.all([
-                    ...winnerIds.map(id => {
-                        const p = freshMap.get(id);
-                        return p
-                            ? PlayerRepository.updatePlayer({ ...p, matchesPlayed: (p.matchesPlayed || 0) + 1, wins: (p.wins || 0) + 1 })
-                            : Promise.resolve();
-                    }),
-                    ...loserIds.map(id => {
-                        const p = freshMap.get(id);
-                        return p
-                            ? PlayerRepository.updatePlayer({ ...p, matchesPlayed: (p.matchesPlayed || 0) + 1, losses: (p.losses || 0) + 1 })
-                            : Promise.resolve();
-                    }),
+            KVStore.setItem('session_date', new Date().toDateString()),
+        ]).then(async ([savedId]) => {
+            // Source-of-truth player stats rebuild.
+            // Old: increment existing counters — drift-prone if a prior save
+            // partially failed (player could show 5W but only 4 matches in DB).
+            // Fix: read ALL matches back and recompute every player's stats
+            // from scratch after each submission. Guarantees consistency.
+            try {
+                const [allMatches, allPlayers] = await Promise.all([
+                    MatchRepository.getAllMatches(),
+                    PlayerRepository.getAllPlayers()
                 ]);
-            }),
-        ]).catch(e => console.error('Background save failed:', e));
+                const statsMap = new Map();
+                for (const p of allPlayers) {
+                    statsMap.set(p.id, { matchesPlayed: 0, wins: 0, losses: 0 });
+                }
+                for (const m of allMatches) {
+                    const wIds = (m.winnerTeam === 'A' ? m.teamAPlayers : m.teamBPlayers).split(',').map(Number);
+                    const lIds = (m.winnerTeam === 'A' ? m.teamBPlayers : m.teamAPlayers).split(',').map(Number);
+                    for (const id of wIds) { const s = statsMap.get(id); if (s) { s.matchesPlayed++; s.wins++; } }
+                    for (const id of lIds) { const s = statsMap.get(id); if (s) { s.matchesPlayed++; s.losses++; } }
+                }
+                await Promise.all(
+                    allPlayers.map(p => {
+                        const s = statsMap.get(p.id);
+                        return s ? PlayerRepository.updatePlayer({ ...p, ...s }) : Promise.resolve();
+                    })
+                );
+            } catch (statsErr) {
+                console.error('Source-of-truth stat rebuild failed:', statsErr);
+            }
+            // Show undo banner with the exact match ID that was saved
+            if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+            setUndoBanner({ prevRotation: prevRotationSnap, prevMatchNum: prevMatchNumSnap, savedMatchId: savedId as number });
+            undoTimerRef.current = setTimeout(() => setUndoBanner(null), 8000);
+        }).catch(e => console.error('Background save failed:', e));
     };
 
+
+    const handleUndo = async () => {
+        if (!undoBanner) return;
+        const { prevRotation, prevMatchNum, savedMatchId } = undoBanner;
+
+        // Dismiss banner immediately
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        setUndoBanner(null);
+
+        try {
+            // 1. Delete the last submitted match from DB
+            await MatchRepository.deleteMatchById(savedMatchId);
+
+            // 2. Recalculate ALL player stats from scratch (source-of-truth rebuild)
+            const [allMatches, allPlayers] = await Promise.all([
+                MatchRepository.getAllMatches(),
+                PlayerRepository.getAllPlayers()
+            ]);
+            const statsMap = new Map<number, { matchesPlayed: number; wins: number; losses: number }>();
+            for (const p of allPlayers) statsMap.set(p.id, { matchesPlayed: 0, wins: 0, losses: 0 });
+            for (const match of allMatches) {
+                const winIds = (match.winnerTeam === 'A' ? match.teamAPlayers : match.teamBPlayers).split(',').map(Number);
+                const loseIds = (match.winnerTeam === 'A' ? match.teamBPlayers : match.teamAPlayers).split(',').map(Number);
+                for (const id of winIds) { const s = statsMap.get(id); if (s) { s.matchesPlayed++; s.wins++; } }
+                for (const id of loseIds) { const s = statsMap.get(id); if (s) { s.matchesPlayed++; s.losses++; } }
+            }
+            for (const player of allPlayers) {
+                const s = statsMap.get(player.id);
+                if (s) await PlayerRepository.updatePlayer({ ...player, ...s });
+            }
+
+            // 3. Restore UI and KV state to before the submission
+            setRotation(prevRotation);
+            setMatchNumber(prevMatchNum);
+            setScoreA('');
+            setScoreB('');
+            await Promise.all([
+                KVStore.setItem('active_match_setup', JSON.stringify(prevRotation)),
+                KVStore.setItem('match_number', prevMatchNum.toString()),
+            ]);
+        } catch (e) {
+            console.error('handleUndo failed:', e);
+            Alert.alert('Undo Failed', 'Could not undo the last score. Please correct it manually in History.');
+        }
+    };
 
     const handleEndSession = () => {
         Alert.alert(
@@ -341,6 +413,20 @@ export default function MatchScreen() {
                         </View>
                     </View>
                 </View>
+
+                {/* ── Undo Banner ── */}
+                {undoBanner && (
+                    <View style={styles.undoBanner}>
+                        <Ionicons name="arrow-undo-circle-outline" size={20} color="#FFD700" />
+                        <Text style={styles.undoBannerText}>Score submitted</Text>
+                        <TouchableOpacity onPress={handleUndo} style={styles.undoBtn}>
+                            <Text style={styles.undoBtnText}>UNDO</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => { if (undoTimerRef.current) clearTimeout(undoTimerRef.current); setUndoBanner(null); }}>
+                            <Ionicons name="close" size={18} color="#555" />
+                        </TouchableOpacity>
+                    </View>
+                )}
 
                 <ScrollView
                     style={styles.scrollArea}
@@ -689,4 +775,28 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,82,82,0.06)',
     },
     endSessionText: { color: '#FF5252', fontSize: 14, fontWeight: '700' },
+
+    // Undo Banner
+    undoBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#1A1A00',
+        borderWidth: 1,
+        borderColor: 'rgba(255,215,0,0.25)',
+        borderRadius: 12,
+        marginHorizontal: 20,
+        marginBottom: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        gap: 8,
+    },
+    undoBannerText: { flex: 1, color: '#AAA', fontSize: 13 },
+    undoBtn: {
+        backgroundColor: '#FFD700',
+        borderRadius: 8,
+        paddingVertical: 5,
+        paddingHorizontal: 12,
+    },
+    undoBtnText: { color: '#000', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
 });
+

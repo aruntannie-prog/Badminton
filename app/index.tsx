@@ -1,9 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter, useFocusEffect } from 'expo-router';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KVStore } from '../database/KVStore';
+import { BackupService } from '../database/BackupService';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BottomNav } from '../components/BottomNav';
 
@@ -26,17 +27,24 @@ export default function HomeScreen() {
 
         const activeMatch = await KVStore.getItem('active_match_setup');
         if (activeMatch) {
-            // Auto-expire stale sessions from previous days
             const sessionDate = await KVStore.getItem('session_date');
-            const today = new Date().toDateString(); // e.g. "Tue Apr 15 2025"
-            if (sessionDate !== today) {
-                // Different day — clear the old session silently
+            const today = new Date().toDateString(); // e.g. "Sat May 17 2025"
+
+            if (sessionDate && sessionDate !== today) {
+                // session_date is set AND it's a different calendar day → expire the session
                 await KVStore.removeItem('active_match_setup');
                 await KVStore.removeItem('match_number');
                 await KVStore.removeItem('session_date');
                 setHasActiveMatch(false);
             } else {
+                // session_date matches today, OR session_date was never written (null) which
+                // means the match is from the current session — never auto-wipe in that case.
                 setHasActiveMatch(true);
+
+                // Stamp today's date if it was missing so future checks work correctly.
+                if (!sessionDate) {
+                    await KVStore.setItem('session_date', today);
+                }
             }
         } else {
             setHasActiveMatch(false);
@@ -46,6 +54,40 @@ export default function HomeScreen() {
     const handleSelectCount = async (count: number) => {
         setSelectedCount(count);
         await KVStore.setItem('player_count', count.toString());
+    };
+
+    const handleExport = async () => {
+        try {
+            await BackupService.exportBackup();
+        } catch (e: any) {
+            Alert.alert('Export Failed', e?.message ?? 'Could not export backup.');
+        }
+    };
+
+    const handleImport = async () => {
+        Alert.alert(
+            'Import Backup',
+            'This will restore players and matches from a backup file. Existing data is kept (additive restore). Continue?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Choose File',
+                    onPress: async () => {
+                        try {
+                            const result = await BackupService.pickAndImport();
+                            Alert.alert(
+                                'Import Successful',
+                                `Restored ${result.playersRestored} players and ${result.matchesRestored} matches.`
+                            );
+                        } catch (e: any) {
+                            if (e?.message !== 'CANCELLED') {
+                                Alert.alert('Import Failed', e?.message ?? 'Could not read backup file.');
+                            }
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     const handleStartMatch = async () => {
@@ -166,6 +208,22 @@ export default function HomeScreen() {
                                 <Text style={styles.secondaryBtnText}>Player Stats</Text>
                             </LinearGradient>
                         </TouchableOpacity>
+
+                        {/* Backup Row */}
+                        <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <TouchableOpacity style={styles.backupBtn} onPress={handleExport} activeOpacity={0.8}>
+                                <LinearGradient colors={['#1A2A1A', '#111']} style={styles.backupBtnInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                                    <Ionicons name="cloud-upload-outline" size={18} color="#76FF03" />
+                                    <Text style={styles.backupBtnText}>Export Backup</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.backupBtn} onPress={handleImport} activeOpacity={0.8}>
+                                <LinearGradient colors={['#1A1A2A', '#111']} style={styles.backupBtnInner} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                                    <Ionicons name="cloud-download-outline" size={18} color="#29B6F6" />
+                                    <Text style={[styles.backupBtnText, { color: '#29B6F6' }]}>Import Backup</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Bottom visual decoration */}
@@ -219,6 +277,10 @@ const styles = StyleSheet.create({
     historyBtn: { borderRadius: 15, overflow: 'hidden', borderWidth: 1, borderColor: '#222' },
     secondaryBtnInner: { paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
     secondaryBtnText: { color: '#AAA', fontSize: 18, fontWeight: 'bold', letterSpacing: 0.5 },
+
+    backupBtn: { flex: 1, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#222' },
+    backupBtnInner: { paddingVertical: 13, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+    backupBtnText: { color: '#76FF03', fontSize: 13, fontWeight: '700' },
 
     bottomDecoration: {
         position: 'absolute',

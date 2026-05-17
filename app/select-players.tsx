@@ -24,6 +24,9 @@ export default function SelectPlayersScreen() {
     const [playerNameInput, setPlayerNameInput] = useState('');
     const [nameError, setNameError] = useState('');
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
+    // Tracks whether the avatars storage directory was created successfully.
+    // If false, avatar uploads are blocked with a user-facing message.
+    const [avatarDirReady, setAvatarDirReady] = useState(true);
 
     // Ensure avatars directory exists
     useEffect(() => {
@@ -36,12 +39,22 @@ export default function SelectPlayersScreen() {
             if (!dirInfo.exists) {
                 await FileSystem.makeDirectoryAsync(FileSystem.documentDirectory + 'avatars/', { intermediates: true });
             }
+            setAvatarDirReady(true);
         } catch (e) {
-            console.error('Error creating avatars dir', e);
+            console.error('Error creating avatars dir — avatar uploads will be unavailable:', e);
+            setAvatarDirReady(false);
         }
     };
 
     const pickImage = async () => {
+        if (!avatarDirReady) {
+            Alert.alert(
+                'Storage Unavailable',
+                'Unable to create the avatars folder on this device. Avatar uploads are disabled. You can still add players without a photo.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
         Alert.alert('Upload Avatar', 'Choose an option', [
             { text: 'Camera', onPress: launchCamera },
             { text: 'Gallery', onPress: launchGallery },

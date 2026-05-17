@@ -2,7 +2,7 @@
   "expo": {
     "name": "BadmintonSmartScore",
     "slug": "badminton-smart-score",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.jpg",
     "userInterfaceStyle": "dark",
@@ -19,7 +19,7 @@
     },
     "android": {
       "package": "com.badminton.smartscore",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.jpg",
         "backgroundColor": "#1A1A1A"
@@ -37,7 +37,8 @@
           "enableFts": true,
           "useSharedCache": true
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "router": {},

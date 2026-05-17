@@ -17,18 +17,20 @@ export const MatchRepository = {
         return await db.getAllAsync<Match>('SELECT * FROM matches ORDER BY timestamp DESC');
     },
 
-    async saveMatch(match: Omit<Match, 'id'>): Promise<void> {
+    async saveMatch(match: Omit<Match, 'id'>): Promise<number> {
         const db = await getDatabase();
         const result = await db.runAsync(
             `INSERT INTO matches (timestamp, teamAPlayers, teamBPlayers, teamAScore, teamBScore, winnerTeam)
        VALUES (?, ?, ?, ?, ?, ?)`,
             match.timestamp, match.teamAPlayers, match.teamBPlayers, match.teamAScore, match.teamBScore, match.winnerTeam
         );
-        
+
         // Sync to cloud in background — don't block or throw on network failure
         const fullMatch: Match = { ...match, id: result.lastInsertRowId };
         CloudSyncService.syncMatch(fullMatch).catch(e => console.warn('Cloud sync failed (saveMatch):', e));
+        return result.lastInsertRowId;
     },
+
 
     async updateMatchScore(id: number, teamAScore: number, teamBScore: number, winnerTeam: 'A' | 'B'): Promise<void> {
         const db = await getDatabase();
@@ -55,5 +57,14 @@ export const MatchRepository = {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
             match.id, match.timestamp, match.teamAPlayers, match.teamBPlayers, match.teamAScore, match.teamBScore, match.winnerTeam
         );
+    },
+
+    /**
+     * Deletes a single match by ID. Used by the undo-last-score feature in match.tsx.
+     */
+    async deleteMatchById(id: number): Promise<void> {
+        const db = await getDatabase();
+        await db.runAsync('DELETE FROM matches WHERE id = ?', id);
     }
 };
+
