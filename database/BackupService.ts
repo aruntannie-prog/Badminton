@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { PlayerRepository, Player } from './PlayerRepository';
@@ -56,20 +56,16 @@ export const BackupService = {
 
         const dateStr = new Date().toISOString().split('T')[0]; // "2026-05-17"
         const filename = `badminton_backup_${dateStr}.json`;
-        const uri = FileSystem.documentDirectory + filename;
+        const backupFile = new File(Paths.document, filename);
 
-        await FileSystem.writeAsStringAsync(
-            uri,
-            JSON.stringify(backup, null, 2),
-            { encoding: FileSystem.EncodingType.UTF8 }
-        );
+        backupFile.write(JSON.stringify(backup, null, 2), { encoding: 'utf8' });
 
         const isAvailable = await Sharing.isAvailableAsync();
         if (!isAvailable) {
             throw new Error('Sharing is not available on this device. The file has been saved locally.');
         }
 
-        await Sharing.shareAsync(uri, {
+        await Sharing.shareAsync(backupFile.uri, {
             mimeType: 'application/json',
             dialogTitle: `Share Badminton Backup (${players.length} players, ${matches.length} matches)`,
             UTI: 'public.json'
@@ -94,9 +90,8 @@ export const BackupService = {
         }
 
         const asset = result.assets[0];
-        const json = await FileSystem.readAsStringAsync(asset.uri, {
-            encoding: FileSystem.EncodingType.UTF8
-        });
+        const assetFile = new File(asset.uri);
+        const json = await assetFile.text();
 
         let backup: BackupFile;
         try {

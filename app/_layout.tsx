@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { useColorScheme, ErrorUtils } from 'react-native';
+import { useColorScheme } from 'react-native';
 import { CloudSyncService } from '../database/CloudSyncService';
 import { ErrorLogger } from '../database/ErrorLogger';
 
@@ -22,9 +22,12 @@ SplashScreen.preventAutoHideAsync();
  * external service — errors are readable via ErrorLogger.getRecentErrors().
  */
 function installGlobalErrorHandler() {
-    const existingHandler = ErrorUtils.getGlobalHandler();
+    const globalErrorUtils = (global as any).ErrorUtils;
+    if (!globalErrorUtils) return;
 
-    ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+    const existingHandler = globalErrorUtils.getGlobalHandler();
+
+    globalErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
         const source = isFatal ? 'FATAL_JS_ERROR' : 'UNHANDLED_JS_ERROR';
         // Fire-and-forget — must not block or throw
         ErrorLogger.logError(source, error).catch(() => {});
